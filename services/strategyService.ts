@@ -1,20 +1,17 @@
 
-import { MarketCandle, StrategyType, Trade, CryptoCurrency, StrategyParameters, StrategyConfigItem } from "../types";
+import { MarketCandle, StrategyType, Trade, CryptoCurrency, StrategyParameters, StrategyConfigItem, MarketRegime, MarketRegimeType, StrategyInsight, CompositeAnalysisResult } from "../types";
 
-// Technical Indicator Helpers
+// --- Math Helpers ---
 const calculateSMA = (data: number[], period: number): number => {
   if (data.length < period) return 0;
   const slice = data.slice(-period);
-  const sum = slice.reduce((a, b) => a + b, 0);
-  return sum / period;
+  return slice.reduce((a, b) => a + b, 0) / period;
 };
 
-// Calculate Exponential Moving Average Series
 const calculateEMASeries = (data: number[], period: number): number[] => {
   if (data.length === 0) return [];
   const k = 2 / (period + 1);
-  const emaArray = [data[0]]; // Start with SMA logic or just first element for simplicity in streaming
-  
+  const emaArray = [data[0]]; 
   for (let i = 1; i < data.length; i++) {
     const ema = data[i] * k + emaArray[i - 1] * (1 - k);
     emaArray.push(ema);
@@ -22,315 +19,261 @@ const calculateEMASeries = (data: number[], period: number): number[] => {
   return emaArray;
 };
 
+const calculateStdDev = (data: number[]): number => {
+  const mean = data.reduce((a, b) => a + b, 0) / data.length;
+  const variance = data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / data.length;
+  return Math.sqrt(variance);
+};
+
 const calculateRSI = (candles: MarketCandle[], period: number = 14): number => {
   if (candles.length < period + 1) return 50;
-  
-  let gains = 0;
-  let losses = 0;
-
-  // Simple RSI calculation for efficiency
+  let gains = 0, losses = 0;
   for (let i = candles.length - period; i < candles.length; i++) {
     const diff = candles[i].close - candles[i - 1].close;
     if (diff >= 0) gains += diff;
-    else losses -= diff; // absolute value
+    else losses -= diff;
   }
-
   if (losses === 0) return 100;
   const rs = gains / losses;
   return 100 - (100 / (1 + rs));
 };
 
-const calculateBollingerBands = (candles: MarketCandle[], period: number = 20, stdDevMult: number = 2) => {
+// --- Market Regime Analysis ---
+export const analyzeMarketRegime = (candles: MarketCandle[]): MarketRegime => {
+  if (candles.length < 30) {
+    return { type: 'RANGING', volatility: 0, trendStrength: 0, description: 'Insufficient Data' };
+  }
+  
   const closes = candles.map(c => c.close);
-  if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
+  const period = 20;
+  
+  // 1. Calculate Volatility (Normalized ATR-like metric)
+  // We use StdDev of % changes to be scale-invariant
+  const returns = [];
+  for(let i=1; i<closes.length; i++) {
+    returns.push((closes[i] - closes[i-1]) / closes[i-1]);
+  }
+  const recentReturns = returns.slice(-period);
+  const volRaw = calculateStdDev(recentReturns) * Math.sqrt(period); // Annualized-ish
+  const volatilityScore = Math.min(100, volRaw * 10000); // Normalize to 0-100 scale roughly
 
-  const sma = calculateSMA(closes, period);
-  const slice = closes.slice(-period);
-  const squaredDiffs = slice.map(val => Math.pow(val - sma, 2));
-  const variance = squaredDiffs.reduce((a, b) => a + b, 0) / period;
-  const stdDev = Math.sqrt(variance);
+  // 2. Calculate Trend Strength (Linear Regression Slope + Consistency)
+  const len = closes.length;
+  const shortMa = calculateSMA(closes, 7);
+  const longMa = calculateSMA(closes, 25);
+  const gap = (shortMa - longMa) / longMa;
+  const trendScore = Math.min(100, Math.abs(gap) * 5000); // Normalize
+
+  let type: MarketRegimeType = 'RANGING';
+  let description = "横盘整理 (Consolidation)";
+
+  if (volatilityScore > 60) {
+    type = 'VOLATILE';
+    description = "高波动剧烈震荡";
+  } else if (trendScore > 20) {
+    if (shortMa > longMa) {
+      type = 'TRENDING_UP';
+      description = "强势多头趋势";
+    } else {
+      type = 'TRENDING_DOWN';
+      description = "强势空头趋势";
+    }
+  }
 
   return {
-    middle: sma,
-    upper: sma + (stdDev * stdDevMult),
-    lower: sma - (stdDev * stdDevMult)
+    type,
+    volatility: volatilityScore,
+    trendStrength: trendScore,
+    description
   };
 };
 
-// MACD Calculation Logic
-const calculateMACD = (candles: MarketCandle[], fast: number, slow: number, signal: number) => {
-    const closes = candles.map(c => c.close);
-    // Need at least slow + signal candles for stable calculation
-    if (closes.length < slow + signal) return { macdLine: 0, signalLine: 0, prevMacdLine: 0, prevSignalLine: 0 };
-
-    const emaFast = calculateEMASeries(closes, fast);
-    const emaSlow = calculateEMASeries(closes, slow);
-
-    // MACD Line = EMA(Fast) - EMA(Slow)
-    const macdLineSeries: number[] = [];
-    for(let i = 0; i < closes.length; i++) {
-        macdLineSeries.push(emaFast[i] - emaSlow[i]);
-    }
-
-    // Signal Line = EMA(Signal) of MACD Line
-    const signalLineSeries = calculateEMASeries(macdLineSeries, signal);
-
-    const macdLine = macdLineSeries[macdLineSeries.length - 1];
-    const signalLine = signalLineSeries[signalLineSeries.length - 1];
-    const prevMacdLine = macdLineSeries[macdLineSeries.length - 2];
-    const prevSignalLine = signalLineSeries[signalLineSeries.length - 2];
-
-    return { macdLine, signalLine, prevMacdLine, prevSignalLine };
-};
-
-// Individual Strategy Signal Generator
-export const getStrategySignal = (
+// --- Single Strategy Analysis ---
+const getStrategyInsight = (
   strategy: StrategyType,
   candles: MarketCandle[],
-  activePositions: Trade[] = [], // Optional: for Martingale
-  allMarketData: Record<string, MarketCandle[]> = {}, // Optional: for Arbitrage
-  params: StrategyParameters // Required now
-): 'BUY' | 'SELL' | 'NEUTRAL' => {
+  activePositions: Trade[],
+  allMarketData: Record<string, MarketCandle[]>,
+  params: StrategyParameters,
+  regime: MarketRegime
+): Omit<StrategyInsight, 'baseWeight' | 'adjustedWeight'> => {
   
   const closes = candles.map(c => c.close);
   const currentPrice = closes[closes.length - 1];
   const symbol = candles[0]?.symbol;
 
+  let signal: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
+  let rawScore = 0;
+  let metrics: { label: string; value: string | number }[] = [];
+  let tuningAction = "Parameters optimal";
+
   switch (strategy) {
     case StrategyType.MA_CROSSOVER: {
-      // Enhanced MA Crossover Strategy with Robust Slope Detection
-      const fastP = params.fastPeriod;
-      const slowP = params.slowPeriod;
-
-      if (closes.length < slowP + 5) return 'NEUTRAL';
+      const maFast = calculateSMA(closes, params.fastPeriod);
+      const maSlow = calculateSMA(closes, params.slowPeriod);
+      const spread = ((maFast - maSlow) / maSlow) * 100;
       
-      const maFast = calculateSMA(closes, fastP);
-      const maSlow = calculateSMA(closes, slowP);
-      const prevMaFast = calculateSMA(closes.slice(0, -1), fastP);
-      const prevMaSlow = calculateSMA(closes.slice(0, -1), slowP);
+      metrics = [
+        { label: `MA(${params.fastPeriod})`, value: maFast.toFixed(2) },
+        { label: `MA(${params.slowPeriod})`, value: maSlow.toFixed(2) },
+        { label: 'Spread', value: `${spread.toFixed(3)}%` }
+      ];
+
+      // Signal Logic
+      if (maFast > maSlow && spread > 0.05) { signal = 'BUY'; rawScore = 0.8; }
+      else if (maFast < maSlow && spread < -0.05) { signal = 'SELL'; rawScore = -0.8; }
       
-      // Slope calculation
-      const maFast_prev3 = calculateSMA(closes.slice(0, -3), fastP);
-      const maSlow_prev3 = calculateSMA(closes.slice(0, -3), slowP);
-
-      const slopeFast = (maFast - maFast_prev3) / 3;
-      const slopeSlow = (maSlow - maSlow_prev3) / 3;
-      
-      const isGoldenCross = prevMaFast <= prevMaSlow && maFast > maSlow;
-      const isDeathCross = prevMaFast >= prevMaSlow && maFast < maSlow;
-
-      if (!isGoldenCross && !isDeathCross) return 'NEUTRAL';
-
-      const slopeThreshold = currentPrice * 0.00005; 
-
-      if (isGoldenCross) {
-        if (slopeFast > slopeThreshold && slopeSlow > -slopeThreshold) return 'BUY';
-      }
-      if (isDeathCross) {
-        if (slopeFast < -slopeThreshold && slopeSlow < slopeThreshold) return 'SELL';
-      }
-      return 'NEUTRAL';
+      // Auto-Tuning Logic
+      if (regime.type === 'RANGING') tuningAction = "Market choppy: Decreasing sensitivity";
+      else tuningAction = "Trend detected: Following trend";
+      break;
     }
-
-    case StrategyType.EMA_CROSSOVER: {
-      const fastP = params.fastPeriod;
-      const slowP = params.slowPeriod;
-
-      if (closes.length < slowP + 1) return 'NEUTRAL';
-
-      const emaFastSeries = calculateEMASeries(closes, fastP);
-      const emaSlowSeries = calculateEMASeries(closes, slowP);
-      
-      const emaFast = emaFastSeries[emaFastSeries.length - 1];
-      const emaSlow = emaSlowSeries[emaSlowSeries.length - 1];
-      const prevEmaFast = emaFastSeries[emaFastSeries.length - 2];
-      const prevEmaSlow = emaSlowSeries[emaSlowSeries.length - 2];
-
-      if (prevEmaFast <= prevEmaSlow && emaFast > emaSlow) return 'BUY';
-      if (prevEmaFast >= prevEmaSlow && emaFast < emaSlow) return 'SELL';
-      return 'NEUTRAL';
-    }
-
+    
     case StrategyType.RSI_REVERSION: {
       const rsi = calculateRSI(candles, params.rsiPeriod);
-      if (rsi < params.rsiOversold) return 'BUY';
-      if (rsi > params.rsiOverbought) return 'SELL';
-      return 'NEUTRAL';
+      metrics = [{ label: 'RSI', value: rsi.toFixed(1) }];
+      
+      // Dynamic Thresholds based on Regime
+      let buyThresh = params.rsiOversold;
+      let sellThresh = params.rsiOverbought;
+      
+      if (regime.type.includes('TRENDING')) {
+         // In trends, RSI hits extremes often. Widen thresholds.
+         tuningAction = "Trending: Widening thresholds to avoid false signals";
+         buyThresh -= 5;
+         sellThresh += 5;
+      } else {
+         tuningAction = "Ranging: Standard reversion logic active";
+      }
+      
+      metrics.push({ label: 'Dynamic Low', value: buyThresh });
+      metrics.push({ label: 'Dynamic High', value: sellThresh });
+
+      if (rsi < buyThresh) { signal = 'BUY'; rawScore = 1; }
+      else if (rsi > sellThresh) { signal = 'SELL'; rawScore = -1; }
+      break;
     }
 
     case StrategyType.BOLLINGER_BREAKOUT: {
-      const { lower, upper } = calculateBollingerBands(candles, params.bbPeriod, params.bbStdDev);
-      if (lower === 0) return 'NEUTRAL';
+      const sma = calculateSMA(closes, params.bbPeriod);
+      const slice = closes.slice(-params.bbPeriod);
+      const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / params.bbPeriod;
+      const stdDev = Math.sqrt(variance);
+      const upper = sma + stdDev * params.bbStdDev;
+      const lower = sma - stdDev * params.bbStdDev;
       
-      if (currentPrice <= lower) return 'BUY';
-      if (currentPrice >= upper) return 'SELL';
-      return 'NEUTRAL';
+      const widthPct = ((upper - lower) / sma) * 100;
+
+      metrics = [
+        { label: 'Upper', value: upper.toFixed(2) },
+        { label: 'Lower', value: lower.toFixed(2) },
+        { label: 'Band Width', value: `${widthPct.toFixed(2)}%` }
+      ];
+
+      if (currentPrice < lower) { signal = 'BUY'; rawScore = 1; } // Mean reversion style for ranges? Or breakout? Usually breakout follows close. Let's assume Mean Reversion for this impl unless trend confirmed.
+      else if (currentPrice > upper) { signal = 'SELL'; rawScore = -1; }
+      
+      if (regime.volatility > 80) tuningAction = "High Volatility: Reducing breakout sensitivity";
+      break;
     }
 
     case StrategyType.MACD_TREND: {
-       const { macdLine, signalLine, prevMacdLine, prevSignalLine } = calculateMACD(candles, params.macdFast, params.macdSlow, params.macdSignal);
-       if (macdLine === 0 && signalLine === 0) return 'NEUTRAL';
+       const emaFast = calculateEMASeries(closes, params.macdFast);
+       const emaSlow = calculateEMASeries(closes, params.macdSlow);
+       const macdLine = emaFast[emaFast.length-1] - emaSlow[emaSlow.length-1];
+       // Simplified signal line for snapshot
+       const macdSeries = emaFast.map((v, i) => v - emaSlow[i]);
+       const signalSeries = calculateEMASeries(macdSeries, params.macdSignal);
+       const signalLine = signalSeries[signalSeries.length-1];
+       const hist = macdLine - signalLine;
 
-       if (prevMacdLine <= prevSignalLine && macdLine > signalLine) return 'BUY';
-       if (prevMacdLine >= prevSignalLine && macdLine < signalLine) return 'SELL';
-       return 'NEUTRAL';
+       metrics = [
+         { label: 'MACD', value: macdLine.toFixed(2) },
+         { label: 'Signal', value: signalLine.toFixed(2) },
+         { label: 'Histogram', value: hist.toFixed(4) }
+       ];
+
+       if (hist > 0 && macdLine > 0) { signal = 'BUY'; rawScore = 0.7; }
+       if (hist < 0 && macdLine < 0) { signal = 'SELL'; rawScore = -0.7; }
+       
+       if (regime.type === 'RANGING') tuningAction = "Ranging: MACD weight suppressed";
+       else tuningAction = "Trending: MACD weight boosted";
+       break;
     }
-
-    case StrategyType.MARTINGALE: {
-      const symbolPositions = activePositions.filter(p => p.symbol === symbol && p.status === 'OPEN');
-      
-      if (symbolPositions.length === 0) {
-          const rsi = calculateRSI(candles, params.rsiPeriod);
-          if (rsi < (params.rsiOversold + 10)) return 'BUY'; 
-          return 'NEUTRAL';
-      }
-
-      const lastTrade = symbolPositions[symbolPositions.length - 1];
-      const entryPrice = lastTrade.price;
-      const priceChangePercent = (currentPrice - entryPrice) / entryPrice;
-      const dropThreshold = -(params.martingalePriceDrop / 100);
-      
-      if (priceChangePercent < dropThreshold) return 'BUY';
-
-      const profitThreshold = (params.martingaleProfitTarget / 100);
-      let totalVol = 0;
-      let totalCost = 0;
-      symbolPositions.forEach(p => {
-          totalVol += p.amount;
-          totalCost += (p.amount * p.price);
-      });
-      const avgPrice = totalCost / totalVol;
-      const avgPriceChange = (currentPrice - avgPrice) / avgPrice;
-
-      if (avgPriceChange > profitThreshold) return 'SELL';
-      return 'NEUTRAL';
-    }
-
-    case StrategyType.ARBITRAGE: {
-      // Logic: Monitor BTC as the market leader.
-      // If BTC moves significantly (considering volatility) and the target asset lags (considering volume depth),
-      // enter a position expecting correlation catch-up.
-      
-      const btcData = allMarketData[CryptoCurrency.BTC];
-      if (!btcData || btcData.length < 30 || !symbol) return 'NEUTRAL';
-      // Do not run arbitrage on BTC itself
-      if (symbol === CryptoCurrency.BTC) return 'NEUTRAL';
-
-      const btcCloses = btcData.map(c => c.close);
-      const assetCloses = candles.map(c => c.close);
-      
-      // 1. Calculate BTC Volatility (Risk Metrics)
-      // Uses standard deviation of returns over the last 20 periods
-      const period = 20;
-      const btcReturns: number[] = [];
-      
-      // Safety: Ensure start index is at least 1 to perform (i-1) check
-      const startIdx = Math.max(1, btcCloses.length - period);
-      
-      for(let i = startIdx; i < btcCloses.length; i++) {
-          const ret = (btcCloses[i] - btcCloses[i-1]) / btcCloses[i-1];
-          btcReturns.push(ret);
-      }
-      
-      if (btcReturns.length === 0) return 'NEUTRAL';
-
-      const avgRet = btcReturns.reduce((a,b) => a+b, 0) / btcReturns.length;
-      const variance = btcReturns.reduce((a,b) => a + Math.pow(b - avgRet, 2), 0) / btcReturns.length;
-      const btcVolatility = Math.sqrt(variance); // 1-period volatility
-
-      // 2. Check Target Asset Liquidity (Depth Proxy)
-      // If asset volume is unusually low, the lag might be due to lack of interest/liquidity, which is a trap.
-      const assetVolumes = candles.slice(-period).map(c => c.volume);
-      if (assetVolumes.length === 0) return 'NEUTRAL';
-      
-      const avgVol = assetVolumes.reduce((a,b) => a+b, 0) / assetVolumes.length;
-      const currentVol = candles[candles.length - 1].volume;
-      
-      // Require current volume to be at least 40% of recent average to ensure tradability
-      if (currentVol < avgVol * 0.4) return 'NEUTRAL';
-
-      // 3. Momentum Comparison (Lookback Window)
-      const lookback = 5;
-      const currentBtcPrice = btcCloses[btcCloses.length - 1];
-      const prevBtcPrice = btcCloses[btcCloses.length - 1 - lookback];
-      
-      const currentAssetPrice = assetCloses[assetCloses.length - 1];
-      const prevAssetPrice = assetCloses[assetCloses.length - 1 - lookback];
-
-      if (!prevBtcPrice || !prevAssetPrice) return 'NEUTRAL';
-
-      const btcReturn = (currentBtcPrice - prevBtcPrice) / prevBtcPrice;
-      const assetReturn = (currentAssetPrice - prevAssetPrice) / prevAssetPrice;
-
-      // 4. Dynamic Thresholds
-      // BTC move needs to be significant relative to its recent volatility to justify a trend.
-      // We scale 1-min volatility to the lookback period (approx sqrt(5)).
-      // Threshold = 1.5 standard deviations of the 5-min move.
-      // Base floor of 0.35% to avoid noise in flat markets.
-      const volatilityThreshold = btcVolatility * Math.sqrt(lookback) * 1.5;
-      const minMoveThreshold = Math.max(0.0035, volatilityThreshold); 
-
-      // 5. Signal Generation
-      // BUY: BTC Pumps, Asset Lags significantly (less than 50% participation)
-      if (btcReturn > minMoveThreshold && assetReturn < (btcReturn * 0.5)) {
-          return 'BUY';
-      }
-
-      // SELL: BTC Dumps, Asset Lags significantly
-      if (btcReturn < -minMoveThreshold && assetReturn > (btcReturn * 0.5)) {
-          return 'SELL';
-      }
-
-      return 'NEUTRAL';
-    }
-
+    
+    // ... Implement basic info for others or defaults
     default:
-      return 'NEUTRAL';
+       metrics = [{ label: 'Status', value: 'Active' }];
+       break;
   }
+
+  return { type: strategy, signal, rawScore, metrics, tuningAction };
 };
 
-// Composite Signal Generator (Weighted Average)
+
+// --- Composite System ---
 export const getCompositeStrategySignal = (
     strategies: StrategyConfigItem[],
     candles: MarketCandle[],
     activePositions: Trade[] = [],
     allMarketData: Record<string, MarketCandle[]> = {},
     params: StrategyParameters
-): { 
-    signal: 'BUY' | 'SELL' | 'NEUTRAL', 
-    score: number, 
-    breakdown: { type: StrategyType, signal: string, weight: number }[] 
-} => {
+): CompositeAnalysisResult => {
+    
+    const regime = analyzeMarketRegime(candles);
+    const insights: StrategyInsight[] = [];
+    
     let totalScore = 0;
     let totalWeight = 0;
-    const breakdown: { type: StrategyType, signal: string, weight: number }[] = [];
 
-    strategies.filter(s => s.enabled).forEach(strategy => {
-        const rawSignal = getStrategySignal(strategy.type, candles, activePositions, allMarketData, params);
-        let numericSignal = 0;
-        if (rawSignal === 'BUY') numericSignal = 1;
-        if (rawSignal === 'SELL') numericSignal = -1;
-
-        totalScore += numericSignal * strategy.weight;
-        totalWeight += strategy.weight;
+    strategies.filter(s => s.enabled).forEach(configItem => {
+        const rawInsight = getStrategyInsight(configItem.type, candles, activePositions, allMarketData, params, regime);
         
-        breakdown.push({
-            type: strategy.type,
-            signal: rawSignal,
-            weight: strategy.weight
+        // --- AUTO-TUNING (Regime Switching) ---
+        let adjustedWeight = configItem.weight;
+        
+        // 1. Trend Strategies: Boost in Trends, Suppress in Range
+        if (['MA_CROSSOVER', 'EMA_CROSSOVER', 'MACD_TREND'].includes(configItem.type)) {
+            if (regime.type.includes('TRENDING')) adjustedWeight *= 1.5;
+            else if (regime.type === 'RANGING') adjustedWeight *= 0.5;
+        }
+        
+        // 2. Reversion Strategies: Boost in Range, Suppress in Strong Trend
+        if (['RSI_REVERSION', 'BOLLINGER_BREAKOUT'].includes(configItem.type)) {
+             if (regime.type === 'RANGING') adjustedWeight *= 1.5;
+             else if (regime.trendStrength > 70) adjustedWeight *= 0.5; // Dangerous to mean revert in strong trend
+        }
+
+        // 3. Volatility Check
+        if (regime.type === 'VOLATILE') {
+             // Reduce confidence in laggy indicators
+             if (configItem.type === 'MA_CROSSOVER') adjustedWeight *= 0.7;
+        }
+
+        adjustedWeight = parseFloat(adjustedWeight.toFixed(2));
+        
+        const numericSignal = rawInsight.signal === 'BUY' ? 1 : (rawInsight.signal === 'SELL' ? -1 : 0);
+        totalScore += numericSignal * adjustedWeight;
+        totalWeight += adjustedWeight;
+        
+        insights.push({
+            ...rawInsight,
+            baseWeight: configItem.weight,
+            adjustedWeight
         });
     });
 
-    if (totalWeight === 0) return { signal: 'NEUTRAL', score: 0, breakdown };
-
-    const finalScore = totalScore / totalWeight;
-
-    // Thresholds for composite decision
-    // > 0.25 -> BUY (implies consensus or strong weighted signal)
-    // < -0.25 -> SELL
+    const finalScore = totalWeight > 0 ? totalScore / totalWeight : 0;
+    
+    // Thresholds
     let finalSignal: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
     if (finalScore > 0.25) finalSignal = 'BUY';
     else if (finalScore < -0.25) finalSignal = 'SELL';
 
-    return { signal: finalSignal, score: finalScore, breakdown };
+    return {
+        signal: finalSignal,
+        score: finalScore,
+        regime,
+        insights
+    };
 };

@@ -1,9 +1,8 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
-  Line,
   Bar,
   XAxis,
   YAxis,
@@ -22,42 +21,60 @@ interface Props {
 // Custom shape to render a single candlestick
 const CandleStickShape = (props: any) => {
   const {
-    x, // x coordinate calculated by Recharts Bar
-    y, // y coordinate (not used directly as we calculate from O/C)
-    width, // width of the slot
-    height, // height (not used directly)
-    payload, // Data object
-    yAxis // YAxis scale function injected by Recharts
+    x, 
+    width, 
+    payload, 
+    yAxis 
   } = props;
 
-  // Ensure we have valid data and scale functions
-  if (!payload || !yAxis || !yAxis.scale) return null;
+  // Defensive check: ensure we have the necessary data and axis scaler
+  if (!payload || !yAxis || typeof yAxis.scale !== 'function') {
+    return null;
+  }
 
   const { open, close, high, low } = payload;
   
-  // Calculate pixel positions using the YAxis scale function
-  // Recharts Y-axis: 0 is top, larger value is bottom.
-  // yAxis.scale(val) converts data value to Y pixel coordinate.
+  // Recharts Y-axis: 0 is at the top, larger values are at the bottom.
+  // We strictly use yAxis.scale() to resolve all Y coordinates.
   const yOpen = yAxis.scale(open);
   const yClose = yAxis.scale(close);
   const yHigh = yAxis.scale(high);
   const yLow = yAxis.scale(low);
 
+  // Safety check for NaN values
+  if (isNaN(yOpen) || isNaN(yClose) || isNaN(yHigh) || isNaN(yLow)) {
+    return null;
+  }
+
   const isUp = close >= open;
   const color = isUp ? '#00C087' : '#F23645';
   
-  // Calculate candle body width and position
-  // Use a percentage of the available slot width, but clamp it for aesthetics
-  const candleWidth = Math.max(2, Math.min(width * 0.6, 12)); 
-  const xPos = x + (width - candleWidth) / 2; // Center the body
-
+  // Calculate candle body geometry
+  // In SVG coordinates, lower Y value is higher on screen
   const bodyTop = Math.min(yOpen, yClose);
-  const bodyHeight = Math.max(1, Math.abs(yOpen - yClose)); // Ensure min height of 1px
+  const bodyBottom = Math.max(yOpen, yClose);
+  let bodyHeight = bodyBottom - bodyTop;
+  
+  // Ensure body has at least 1px height so it is visible even if open == close
+  if (bodyHeight < 1) bodyHeight = 1;
+
+  // Calculate width: prevent it from being too thin or too wide
+  // We center the candle within the allocated band slot
+  const candleWidth = Math.max(2, Math.min(width * 0.6, 12)); 
+  const xPos = x + (width - candleWidth) / 2;
+  const wickX = x + width / 2;
 
   return (
-    <g stroke={color} fill={color} strokeWidth="1.5">
-      {/* Wick (High to Low) - Centered in the slot */}
-      <line x1={x + width / 2} y1={yHigh} x2={x + width / 2} y2={yLow} />
+    <g>
+      {/* Wick (High to Low) */}
+      <line 
+        x1={wickX} 
+        y1={yHigh} 
+        x2={wickX} 
+        y2={yLow} 
+        stroke={color} 
+        strokeWidth="1.5"
+      />
       
       {/* Body (Open to Close) */}
       <rect 
@@ -65,6 +82,7 @@ const CandleStickShape = (props: any) => {
         y={bodyTop} 
         width={candleWidth} 
         height={bodyHeight} 
+        fill={color}
         stroke="none"
       />
     </g>
@@ -80,12 +98,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     const isUp = data.close >= data.open;
     const color = isUp ? '#00C087' : '#F23645';
     
-    // Format time
-    const dateStr = new Date(data.timestamp).toLocaleTimeString();
-
     return (
       <div className="bg-[#1E2329] border border-[#474D57] p-3 rounded shadow-xl text-xs font-mono z-50">
-        <div className="text-[#848E9C] mb-2">{data.time || dateStr}</div>
+        <div className="text-[#848E9C] mb-2">{data.time}</div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
           <div className="text-gray-400">Open:</div><div style={{color}}>{data.open.toFixed(2)}</div>
           <div className="text-gray-400">High:</div><div style={{color}}>{data.high.toFixed(2)}</div>
@@ -105,10 +120,32 @@ const ChartComponent: React.FC<Props> = ({ data, symbol }) => {
   const isUp = lastCandle ? lastCandle.close >= lastCandle.open : false;
   const color = isUp ? '#00C087' : '#F23645';
 
-  // Calculate Domain padding
+  // Calculate Domain padding dynamically
   const minPrice = data.length > 0 ? Math.min(...data.map(d => d.low)) : 0;
   const maxPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
-  const padding = (maxPrice - minPrice) * 0.1; // 10% padding to avoid candles touching edges
+  
+  const range = maxPrice - minPrice;
+  // Padding ensures candles don't touch the top/bottom edges
+  const padding = range === 0 ? maxPrice * 0.005 : range * 0.15; 
+  const yDomain = [minPrice - padding, maxPrice + padding];
+
+  // Process data to include a range array [low, high] for the Bar component.
+  // This forces Recharts to render the Bar within the visible Y-axis domain,
+  // avoiding the "clipping" issue that occurs when using 'close' (0 to value) on high-value assets.
+  const processedData = useMemo(() => {
+    return data.map(d => ({
+      ...d,
+      candleRange: [d.low, d.high]
+    }));
+  }, [data]);
+
+  if (!data || data.length === 0) {
+    return (
+       <div className="h-full w-full bg-crypto-panel border border-gray-800 rounded-lg p-4 flex items-center justify-center text-gray-500">
+          Loading Data...
+       </div>
+    );
+  }
 
   return (
     <div className="h-full w-full bg-crypto-panel border border-gray-800 rounded-lg p-4 flex flex-col">
@@ -127,52 +164,55 @@ const ChartComponent: React.FC<Props> = ({ data, symbol }) => {
       
       <div className="flex-grow min-h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <ComposedChart data={processedData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2A2E39" vertical={false} />
             
             <XAxis 
               dataKey="time" 
               stroke="#848E9C" 
-              tick={{fontSize: 10}} 
+              tick={{fontSize: 10, fill: '#848E9C'}} 
               tickLine={false}
               axisLine={false}
-              minTickGap={50}
+              minTickGap={30}
             />
             
             <YAxis 
-              domain={[minPrice - padding, maxPrice + padding]} 
+              domain={yDomain} 
               stroke="#848E9C" 
-              tick={{fontSize: 11}}
+              tick={{fontSize: 11, fill: '#848E9C'}}
               tickLine={false}
               axisLine={false}
               tickFormatter={(val) => val < 10 ? val.toFixed(4) : val.toFixed(0)}
               width={60}
               orientation="right"
+              allowDataOverflow={true} 
             />
             
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#474D57', strokeWidth: 1, strokeDasharray: '3 3' }}/>
+            <Tooltip 
+              content={<CustomTooltip />} 
+              cursor={{ stroke: '#474D57', strokeWidth: 1, strokeDasharray: '3 3' }}
+              isAnimationActive={false}
+            />
 
             <ReferenceLine 
               y={currentPrice} 
               stroke={color} 
               strokeDasharray="3 3" 
-              label={{ position: 'insideRight', value: 'Current', fill: color, fontSize: 10 }} 
+              label={{ position: 'insideRight', value: 'Price', fill: color, fontSize: 10 }} 
             />
 
             {/* 
-               Use Bar with custom shape for Candlesticks.
-               dataKey="close" provides a base value, but CandleStickShape uses the full payload.
-               isAnimationActive={false} is critical for performance and smooth updates.
+              KEY FIX: Use 'candleRange' (array [low, high]) as dataKey.
+              This treats the bar as a floating bar within the visible domain.
+              Recharts will render this bar fully inside the chart area.
+              Our CandleStickShape then paints the specific open/close/wick details.
             */}
             <Bar 
-              dataKey="close" 
+              dataKey="candleRange" 
+              minPointSize={2}
               shape={<CandleStickShape />} 
               isAnimationActive={false}
             />
-
-            {/* Hidden lines to help ensuring domain coverage if auto-scale logic is needed */}
-            <Line dataKey="high" stroke="none" dot={false} isAnimationActive={false} />
-            <Line dataKey="low" stroke="none" dot={false} isAnimationActive={false} />
 
             <Brush 
               dataKey="time" 

@@ -47,13 +47,13 @@ export interface StrategyParameters {
   macdSlow: number;
   macdSignal: number;
   // Martingale
-  martingalePriceDrop: number; // Percentage drop to trigger add (e.g., 1.5 for 1.5%)
-  martingaleProfitTarget: number; // Percentage gain to take profit (e.g., 2.5 for 2.5%)
-  martingaleVolumeMultiplier: number; // Multiplier for next order size (e.g. 2 for doubling down, 1 for linear)
+  martingalePriceDrop: number; 
+  martingaleProfitTarget: number; 
+  martingaleVolumeMultiplier: number; 
 }
 
 export interface MarketCandle {
-  symbol: string; // Added to track source
+  symbol: string; 
   time: string;
   timestamp: number;
   open: number;
@@ -61,42 +61,43 @@ export interface MarketCandle {
   low: number;
   close: number;
   volume: number;
-  isFinal?: boolean; // From Binance to know if candle closed
+  isFinal?: boolean; 
+  candleRange?: [number, number]; // For visualization
 }
 
 export interface Trade {
   id: string;
-  symbol: string; // Changed to string to match CryptoCurrency values easily
+  symbol: string; 
   type: 'BUY' | 'SELL';
-  price: number; // Entry Price
+  price: number; 
   amount: number;
-  leverage: number; // Leverage used
+  leverage: number; 
   timestamp: number;
-  pnl?: number; // Realized PnL
-  unrealizedPnl?: number; // Calculated live
+  pnl?: number; 
+  unrealizedPnl?: number; 
   status: 'OPEN' | 'CLOSED';
   strategy: string;
 }
 
 export interface SystemConfig {
-  apiKey: string; // For Gemini
-  binanceApiKey?: string; // Added for Binance Real Trading
+  apiKey: string; 
+  binanceApiKey?: string; 
   initialCapital: number;
   riskLevel: RiskLevel;
   selectedAssets: CryptoCurrency[];
-  activeStrategies: StrategyConfigItem[]; // CHANGED: Support multiple strategies
-  timeframe: Timeframe; // Added Timeframe selection
-  strategyParams: StrategyParameters; // New configurable parameters
-  leverage: number; // Trading leverage
+  activeStrategies: StrategyConfigItem[]; 
+  timeframe: Timeframe; 
+  strategyParams: StrategyParameters; 
+  leverage: number; 
 }
 
 export interface SystemState {
   balance: number;
   positions: Trade[];
-  marketData: Record<string, MarketCandle[]>; // Key is symbol (e.g., 'BTC')
+  marketData: Record<string, MarketCandle[]>; 
   isLive: boolean;
   logs: LogEntry[];
-  currentPrices: Record<string, number>; // Map of current prices for all assets
+  currentPrices: Record<string, number>; 
 }
 
 export interface LogEntry {
@@ -104,4 +105,32 @@ export interface LogEntry {
   timestamp: number;
   level: 'INFO' | 'WARNING' | 'ERROR' | 'TRADE' | 'AI';
   message: string;
+}
+
+// --- New Types for Strategy Dashboard ---
+
+export type MarketRegimeType = 'TRENDING_UP' | 'TRENDING_DOWN' | 'RANGING' | 'VOLATILE';
+
+export interface MarketRegime {
+  type: MarketRegimeType;
+  volatility: number; // 0 - 100 normalized
+  trendStrength: number; // 0 - 100
+  description: string;
+}
+
+export interface StrategyInsight {
+  type: StrategyType;
+  signal: 'BUY' | 'SELL' | 'NEUTRAL';
+  baseWeight: number;
+  adjustedWeight: number; // After auto-tuning
+  rawScore: number;
+  metrics: { label: string; value: string | number }[]; // Key metrics for display
+  tuningAction: string; // Description of auto-adjustment
+}
+
+export interface CompositeAnalysisResult {
+  signal: 'BUY' | 'SELL' | 'NEUTRAL';
+  score: number;
+  regime: MarketRegime;
+  insights: StrategyInsight[];
 }
