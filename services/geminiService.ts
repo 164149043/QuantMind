@@ -2,9 +2,22 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { MarketCandle, RiskLevel, Trade } from "../types";
 
-// Initialize the AI client. 
-// Note: API Key is expected to be in process.env.API_KEY as per instructions.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to safely get API Key in both Vite and other environments
+const getApiKey = () => {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+    return import.meta.env.VITE_API_KEY;
+  }
+  try {
+    return process.env.API_KEY;
+  } catch (e) {
+    return '';
+  }
+};
+
+const apiKey = getApiKey();
+
+// Initialize the AI client only if key exists, otherwise handle gracefully
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 export const analyzeMarketCondition = async (
   symbol: string,
@@ -12,10 +25,13 @@ export const analyzeMarketCondition = async (
   riskLevel: RiskLevel,
   activePositions: Trade[],
   initialCapital: number,
-  strategyDescription: string // Updated to generic description
+  strategyDescription: string 
 ): Promise<{ signal: 'BUY' | 'SELL' | 'HOLD'; reasoning: string; confidence: number }> => {
 
-  // Increased to last 200 candles for deeper context as requested
+  if (!ai) {
+    return { signal: 'HOLD', reasoning: '未配置 API Key，无法进行 AI 分析。请在 .env 文件中设置 VITE_API_KEY。', confidence: 0 };
+  }
+
   const recentData = candles.slice(-200); 
   
   if (recentData.length < 30) {
@@ -24,7 +40,6 @@ export const analyzeMarketCondition = async (
 
   const currentPrice = recentData[recentData.length - 1]?.close;
   
-  // Construct a detailed prompt including capital context and risk profile
   const prompt = `
     你是一名资深加密货币量化交易员。请根据以下市场数据进行技术面分析。
 
@@ -91,6 +106,8 @@ export const generateStrategyReport = async (
   trades: Trade[],
   totalPnl: number
 ): Promise<string> => {
+    if (!ai) return "请配置 API Key 以启用 AI 报告功能。";
+
     const prompt = `
       分析本次交易会话:
       总盈亏: $${totalPnl.toFixed(2)}

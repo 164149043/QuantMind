@@ -9,7 +9,6 @@ import {
   Trade,
   StrategyType,
   MarketCandle,
-  Timeframe,
   CompositeAnalysisResult
 } from './types';
 import { generateInitialData, generateNextCandle } from './services/marketSimulator';
@@ -17,7 +16,7 @@ import { analyzeMarketCondition } from './services/geminiService';
 import { BinanceService } from './services/binanceService';
 import { getCompositeStrategySignal } from './services/strategyService';
 import { ActivityIcon, SettingsIcon, PlayIcon, PauseIcon, BrainIcon } from './components/Icons';
-import { StrategyMonitor } from './components/StrategyMonitor'; // CHANGED: Replaced Chart
+import { StrategyMonitor } from './components/StrategyMonitor';
 import LogPanel from './components/LogPanel';
 import StatsPanel from './components/StatsPanel';
 import PositionTable from './components/PositionTable';
@@ -72,6 +71,18 @@ const DEFAULT_CONFIG: SystemConfig = {
 const formatPrice = (price: number) => {
   if (price < 10) return price.toFixed(4);
   return price.toFixed(2);
+};
+
+// Safe API Key retrieval
+const getEnvApiKey = () => {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+    return import.meta.env.VITE_API_KEY;
+  }
+  try {
+    return process.env.API_KEY;
+  } catch (e) {
+    return '';
+  }
 };
 
 const App: React.FC = () => {
@@ -324,8 +335,9 @@ const App: React.FC = () => {
   }, [isSimulating, config.selectedAssets, config.timeframe, processMarketTick]);
 
   const handleAIAnalysis = async () => {
-    if (!process.env.API_KEY) {
-      addLog("无法执行 AI 分析: 环境变量中缺少 API Key", "ERROR");
+    const apiKey = getEnvApiKey();
+    if (!apiKey) {
+      addLog("无法执行 AI 分析: 缺少 API Key。请在 .env 中配置 VITE_API_KEY。", "ERROR");
       return;
     }
     setAiThinking(true);
@@ -378,7 +390,6 @@ const App: React.FC = () => {
   }, 0);
   const totalEquity = state.balance + totalUnrealizedPnl;
   
-  // Default placeholder analysis if undefined
   const currentAnalysis = latestAnalysis[activeSymbol] || { 
       signal: 'NEUTRAL', 
       score: 0, 
