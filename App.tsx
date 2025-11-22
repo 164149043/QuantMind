@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SystemConfig, 
@@ -75,14 +74,7 @@ const formatPrice = (price: number) => {
 
 // Safe API Key retrieval
 const getEnvApiKey = () => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
-    return import.meta.env.VITE_API_KEY;
-  }
-  try {
-    return process.env.API_KEY;
-  } catch (e) {
-    return '';
-  }
+  return process.env.API_KEY || '';
 };
 
 const App: React.FC = () => {
@@ -337,7 +329,7 @@ const App: React.FC = () => {
   const handleAIAnalysis = async () => {
     const apiKey = getEnvApiKey();
     if (!apiKey) {
-      addLog("无法执行 AI 分析: 缺少 API Key。请在 .env 中配置 VITE_API_KEY。", "ERROR");
+      addLog("无法执行 AI 分析: 缺少 API Key。请在 .env 中配置 API_KEY。", "ERROR");
       return;
     }
     setAiThinking(true);

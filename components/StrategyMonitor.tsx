@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { CompositeAnalysisResult, StrategyInsight, MarketRegime, CryptoCurrency, StrategyType } from '../types';
 
@@ -42,7 +41,7 @@ const RegimeBadge = ({ regime }: { regime: MarketRegime }) => {
   );
 };
 
-const StrategyCard = ({ insight }: { insight: StrategyInsight }) => {
+const StrategyCard: React.FC<{ insight: StrategyInsight }> = ({ insight }) => {
   const signalColor = insight.signal === 'BUY' ? 'text-crypto-up' : (insight.signal === 'SELL' ? 'text-crypto-down' : 'text-gray-500');
   const weightDiff = insight.adjustedWeight - insight.baseWeight;
   const isBoosted = weightDiff > 0;

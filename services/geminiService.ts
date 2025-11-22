@@ -1,20 +1,9 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { MarketCandle, RiskLevel, Trade } from "../types";
 
-// Helper to safely get API Key in both Vite and other environments
-const getApiKey = () => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
-    return import.meta.env.VITE_API_KEY;
-  }
-  try {
-    return process.env.API_KEY;
-  } catch (e) {
-    return '';
-  }
-};
-
-const apiKey = getApiKey();
+// Helper to safely get API Key
+// GUIDELINE: The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+const apiKey = process.env.API_KEY;
 
 // Initialize the AI client only if key exists, otherwise handle gracefully
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
@@ -29,7 +18,7 @@ export const analyzeMarketCondition = async (
 ): Promise<{ signal: 'BUY' | 'SELL' | 'HOLD'; reasoning: string; confidence: number }> => {
 
   if (!ai) {
-    return { signal: 'HOLD', reasoning: '未配置 API Key，无法进行 AI 分析。请在 .env 文件中设置 VITE_API_KEY。', confidence: 0 };
+    return { signal: 'HOLD', reasoning: '未配置 API Key，无法进行 AI 分析。请确保 process.env.API_KEY 已设置。', confidence: 0 };
   }
 
   const recentData = candles.slice(-200); 
