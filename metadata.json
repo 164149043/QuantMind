@@ -1,0 +1,5 @@
+{
+  "name": "QuantMind 智脑量化",
+  "description": "集成币安(Binance)实盘数据的量化交易系统，支持 BTC, ETH, BNB, SOL, DOGE 永续合约。具备实时策略执行、多策略组合(MA/RSI/布林带/MACD/EMA)、AI 市场分析及实时盈亏监控功能。",
+  "requestFramePermissions": []
+}

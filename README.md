@@ -1,11 +1,80 @@
-<div align="center">
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+# QuantMind 智脑量化 (AI Quantitative Trading System)
 
-  <h1>Built with AI Studio</h2>
+QuantMind 是一个现代化的、AI 驱动的加密货币量化交易前端系统。它结合了传统的算法交易策略（如均线交叉、RSI 回归、马丁格尔）与 Google Gemini 生成式 AI 的市场分析能力，为交易者提供决策辅助。
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 核心功能
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+### 1. 实时与模拟市场数据
+- **双模驱动**：支持 Binance WebSocket 实时行情接入，同时内置高保真市场模拟器（基于几何布朗运动）。
+- **多周期支持**：支持 1m, 15m, 1h, 4h, 1d 等多种 K 线周期切换，并具备数据缓存机制以优化性能。
 
-</div>
+### 2. 专业级图表可视化
+- 基于 Recharts 构建的高性能 K 线图。
+- **交互增强**：支持缩放（Brush）、平移、实时价格参考线、Y 轴自动缩放。
+- **视觉优化**：针对加密货币市场的红绿配色（涨跌），包含成交量、High/Low 影线细节。
+
+### 3. 强大的策略配置中心
+系统内置多种经典量化策略，所有策略的核心参数均可在“全局配置”面板中进行微调，支持输入验证和参数说明：
+
+#### 趋势跟随类
+- **MA 双均线交叉 (MA Crossover)**: 
+  - 包含斜率过滤逻辑，有效识别横盘震荡。
+  - **可配置**: 快线/慢线周期 (Fast/Slow Period)。
+- **EMA 指数均线交叉**: 
+  - 反应更灵敏的趋势跟踪。
+- **MACD 趋势跟踪**: 
+  - 经典的动能指标。
+  - **可配置**: Fast EMA, Slow EMA, Signal Line 周期。
+- **布林带突破 (Bollinger Breakout)**: 
+  - 捕捉波动率突破。
+  - **可配置**: 均线周期 (Period), 标准差倍数 (StdDev)。
+
+#### 震荡与回归类
+- **RSI 均值回归**: 
+  - 经典的震荡策略，高抛低吸。
+  - **可配置**: 计算周期, 超买阈值 (Overbought), 超卖阈值 (Oversold)。
+
+#### 高级策略 (New)
+- **马丁格尔网格 (Martingale DCA)**: 
+  - **核心逻辑**: 逆势交易策略。当市场出现超卖信号（RSI）时建立首仓，随后如果价格下跌，则按设定的百分比（Price Drop）分批加仓以摊低持仓成本。
+  - **止盈机制**: 当整体持仓的加权平均价达到目标收益率（Profit Target）时，一次性平仓所有头寸。
+  - **风险提示**: 适合震荡行情。在单边暴跌行情中可能会占用大量保证金，请合理设置加仓倍数。
+  - **可配置参数**: 补仓跌幅、止盈目标、加仓倍数 (Multiplier)。
+
+- **趋势相关性套利 (Arbitrage)**:
+  - **核心逻辑**: 利用主流币（BTC）作为市场风向标。系统实时监控 BTC 的分钟级走势，当 BTC 出现大幅拉升或跳水，而目标山寨币尚未反应（存在滞后）时，利用时间差进行“补涨追多”或“补跌追空”。
+  - **特点**: 无需复杂参数，自动适应市场波动率。
+
+### 4. AI 智能分析 (Gemini Powered)
+- 集成 **Google Gemini 2.5 Flash** 模型。
+- 根据当前盘面数据（K线序列）、用户风险偏好（保守/激进）及资金状况，生成自然语言的市场分析报告。
+- 提供买卖置信度评分及具体操作建议。
+
+### 5. 交易与风控系统
+- **模拟与实盘**: 实时计算未结盈亏 (Unrealized PnL)、已结盈亏及账户净值。
+- **杠杆交易**: 支持 1x - 125x 合约杠杆配置，放大资金利用率。
+- **仓位管理**: 可配置风险等级，自动调整单笔开仓资金比例：
+  - **保守 (Low)**: 10% 仓位
+  - **稳健 (Medium)**: 15% 仓位
+  - **激进 (High)**: 30% 仓位
+
+## 技术栈
+
+- **核心框架**: React 19, TypeScript
+- **样式库**: Tailwind CSS
+- **图表库**: Recharts
+- **AI SDK**: @google/genai (Google Gemini API)
+- **数据源**: WebSocket (Binance API) / Local Simulation
+
+## 快速开始
+
+1. **环境配置**:
+   确保项目中配置了 `process.env.API_KEY` (用于 Google Gemini)。
+
+2. **运行项目**:
+   本项目结构适配现代 React 构建工具 (Vite/CRA)。
+
+## 免责声明
+
+本项目仅供学习、研究及模拟交易使用。加密货币交易风险极高，AI 分析结果仅供参考，不构成任何财务建议。实盘交易请务必谨慎。
