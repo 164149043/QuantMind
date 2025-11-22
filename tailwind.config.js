@@ -1,28 +1,10 @@
 
+// 禁用本地 Tailwind 配置，配置已移动到 index.html 的 script 标签中
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./**/*.{js,ts,jsx,tsx}",
-  ],
+  content: [],
   theme: {
-    extend: {
-      fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
-      },
-      colors: {
-        crypto: {
-          dark: '#0B0E11',
-          panel: '#161A1E',
-          accent: '#2962FF',
-          up: '#00C087',
-          down: '#F23645',
-          text: '#EAECEF',
-          muted: '#848E9C'
-        }
-      }
-    },
+    extend: {},
   },
   plugins: [],
 }
