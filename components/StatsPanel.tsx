@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Trade } from '../types';
 
@@ -31,8 +32,11 @@ const StatsPanel: React.FC<Props> = ({ balance, initialCapital, openPositions })
         <div className="text-2xl font-mono font-bold text-blue-400">{openPositions.length}</div>
       </div>
       
-       <div className="bg-crypto-panel p-4 rounded-lg border border-gray-800">
-        <div className="text-crypto-muted text-xs uppercase">风险敞口 (Exposure)</div>
+       <div className="bg-crypto-panel p-4 rounded-lg border border-gray-800 cursor-help relative group" title="风险敞口 = (持仓总价值 / 总账户权益) * 100%。&#013;它反映了您当前有多少资金处于市场波动的风险中。&#013;建议新手控制在 20-30% 以下。">
+        <div className="text-crypto-muted text-xs uppercase flex items-center gap-1">
+           风险敞口 (Exposure) 
+           <span className="text-[10px] bg-gray-700 rounded-full w-3 h-3 inline-flex items-center justify-center text-white font-bold">?</span>
+        </div>
         <div className="text-2xl font-mono font-bold text-yellow-400">
             {/* Simple metric: active positions * fixed size / total balance */}
             {openPositions.length > 0 ? ((openPositions.length * 0.1) * 100).toFixed(0) : 0}%

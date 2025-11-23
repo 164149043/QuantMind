@@ -18,6 +18,37 @@ const strategyLabelMap: Record<StrategyType, string> = {
   [StrategyType.ARBITRAGE]: '趋势相关性套利'
 };
 
+const strategyInfoMap: Record<StrategyType, { desc: string; usage: string }> = {
+  [StrategyType.MA_CROSSOVER]: {
+    desc: "利用短期均线(快线)上穿或下穿长期均线(慢线)来判断趋势的形成。金叉买入，死叉卖出。",
+    usage: "✅ 适用: 单边大趋势行情。\n❌ 忌讳: 横盘震荡 (频繁止损磨损本金)。"
+  },
+  [StrategyType.EMA_CROSSOVER]: {
+    desc: "原理同 MA，但 EMA 对近期价格权重更高，信号比普通 MA 更灵敏，能更早入场。",
+    usage: "✅ 适用: 波动较快的趋势行情。\n❌ 忌讳: 极度无序的震荡市。"
+  },
+  [StrategyType.RSI_REVERSION]: {
+    desc: "基于“物极必反”原理。RSI 高于超买阈值(如70)时看空，低于超卖阈值(如30)时看多。",
+    usage: "✅ 适用: 箱体震荡、横盘整理行情。\n❌ 忌讳: 强烈的单边暴涨暴跌 (会过早摸顶抄底)。"
+  },
+  [StrategyType.BOLLINGER_BREAKOUT]: {
+    desc: "当价格突破布林带上轨时视为强势多头信号；跌破下轨时视为空头信号。利用波动率放大进行交易。",
+    usage: "✅ 适用: 盘整后的突破行情。\n❌ 忌讳: 缩量窄幅震荡。"
+  },
+  [StrategyType.MACD_TREND]: {
+    desc: "利用快慢均线的聚合与分离(DIF/DEA)及柱状图来判断中长期动能方向。",
+    usage: "✅ 适用: 中长线趋势判断，过滤假信号能力强。\n❌ 忌讳: 超短线高频交易。"
+  },
+  [StrategyType.MARTINGALE]: {
+    desc: "逆势策略。亏损时按比例加仓摊低成本，一旦价格回调即可获利离场。",
+    usage: "✅ 适用: 有底部的震荡行情。\n⚠️ 风险: 必须严格控制仓位，单边行情可能导致爆仓。"
+  },
+  [StrategyType.ARBITRAGE]: {
+    desc: "利用相关资产(如 BTC/ETH)的价差回归进行套利。当前版本仅为模拟逻辑。",
+    usage: "✅ 适用: 市场非理性波动时。"
+  }
+};
+
 const riskLabelMap: Record<RiskLevel, string> = {
   [RiskLevel.LOW]: '保守 (Low)',
   [RiskLevel.MEDIUM]: '稳健 (Medium)',
@@ -127,126 +158,160 @@ const ConfigPanel: React.FC<Props> = ({ config, onConfigChange, onClose }) => {
   };
 
   const renderStrategyParams = (strategyType: StrategyType) => {
+    const info = strategyInfoMap[strategyType];
+    
+    const InfoBox = (
+      <div className="bg-blue-900/20 border border-blue-800/50 rounded p-3 mb-4 text-xs">
+        <h5 className="font-bold text-blue-400 mb-1 flex items-center gap-2">
+          💡 策略原理
+        </h5>
+        <p className="text-gray-300 mb-2 leading-relaxed opacity-90">{info.desc}</p>
+        <div className="bg-black/40 p-2 rounded border border-white/5 whitespace-pre-line text-gray-400">
+          {info.usage}
+        </div>
+      </div>
+    );
+
     switch (strategyType) {
       case StrategyType.MA_CROSSOVER:
       case StrategyType.EMA_CROSSOVER:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ParamInput 
-              label="快线周期 (Fast Period)"
-              value={config.strategyParams.fastPeriod}
-              onChange={(v) => updateParam('fastPeriod', v)}
-              min={2} max={100}
-              hint="短期均线（如 7）。数值越小反应越快，入场更早，但在震荡市中可能产生更多假信号。"
-            />
-            <ParamInput 
-              label="慢线周期 (Slow Period)"
-              value={config.strategyParams.slowPeriod}
-              onChange={(v) => updateParam('slowPeriod', v)}
-              min={5} max={300}
-              hint="长期均线（如 25）。用于确定主趋势方向。必须大于快线周期。"
-            />
+          <div>
+            {InfoBox}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ParamInput 
+                label="快线周期 (Fast Period)"
+                value={config.strategyParams.fastPeriod}
+                onChange={(v) => updateParam('fastPeriod', v)}
+                min={2} max={100}
+                hint="短期均线（如 7）。数值越小反应越快，入场更早，但在震荡市中可能产生更多假信号。"
+              />
+              <ParamInput 
+                label="慢线周期 (Slow Period)"
+                value={config.strategyParams.slowPeriod}
+                onChange={(v) => updateParam('slowPeriod', v)}
+                min={5} max={300}
+                hint="长期均线（如 25）。用于确定主趋势方向。必须大于快线周期。"
+              />
+            </div>
           </div>
         );
       case StrategyType.RSI_REVERSION:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <ParamInput 
-              label="RSI 计算周期"
-              value={config.strategyParams.rsiPeriod}
-              onChange={(v) => updateParam('rsiPeriod', v)}
-              min={2} max={50}
-              hint="标准值为 14。较短周期（如 7）波动剧烈，较长周期（如 21）信号平滑。"
-            />
-            <ParamInput 
-              label="超买阈值 (Sell)"
-              value={config.strategyParams.rsiOverbought}
-              onChange={(v) => updateParam('rsiOverbought', v)}
-              min={50} max={99}
-              hint="当 RSI 高于此值（如 70）时，视为'超买'，寻找做空机会。"
-            />
-            <ParamInput 
-              label="超卖阈值 (Buy)"
-              value={config.strategyParams.rsiOversold}
-              onChange={(v) => updateParam('rsiOversold', v)}
-              min={1} max={50}
-              hint="当 RSI 低于此值（如 30）时，视为'超卖'，寻找做多机会。"
-            />
+          <div>
+            {InfoBox}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <ParamInput 
+                label="RSI 计算周期"
+                value={config.strategyParams.rsiPeriod}
+                onChange={(v) => updateParam('rsiPeriod', v)}
+                min={2} max={50}
+                hint="标准值为 14。较短周期（如 7）波动剧烈，较长周期（如 21）信号平滑。"
+              />
+              <ParamInput 
+                label="超买阈值 (Sell)"
+                value={config.strategyParams.rsiOverbought}
+                onChange={(v) => updateParam('rsiOverbought', v)}
+                min={50} max={99}
+                hint="当 RSI 高于此值（如 70）时，视为'超买'，寻找做空机会。"
+              />
+              <ParamInput 
+                label="超卖阈值 (Buy)"
+                value={config.strategyParams.rsiOversold}
+                onChange={(v) => updateParam('rsiOversold', v)}
+                min={1} max={50}
+                hint="当 RSI 低于此值（如 30）时，视为'超卖'，寻找做多机会。"
+              />
+            </div>
           </div>
         );
       case StrategyType.BOLLINGER_BREAKOUT:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ParamInput 
-              label="均线周期 (Period)"
-              value={config.strategyParams.bbPeriod}
-              onChange={(v) => updateParam('bbPeriod', v)}
-              min={5} max={100}
-              hint="布林带中轨（SMA）的计算周期，标准为 20。"
-            />
-            <ParamInput 
-              label="标准差倍数 (StdDev)"
-              value={config.strategyParams.bbStdDev}
-              onChange={(v) => updateParam('bbStdDev', v)}
-              min={1} max={4} step={0.1}
-              hint="决定通道宽度（标准 2.0）。数值越小易触发突破信号，数值越大信号越少。"
-            />
+          <div>
+            {InfoBox}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ParamInput 
+                label="均线周期 (Period)"
+                value={config.strategyParams.bbPeriod}
+                onChange={(v) => updateParam('bbPeriod', v)}
+                min={5} max={100}
+                hint="布林带中轨（SMA）的计算周期，标准为 20。"
+              />
+              <ParamInput 
+                label="标准差倍数 (StdDev)"
+                value={config.strategyParams.bbStdDev}
+                onChange={(v) => updateParam('bbStdDev', v)}
+                min={1} max={4} step={0.1}
+                hint="决定通道宽度（标准 2.0）。数值越小易触发突破信号，数值越大信号越少。"
+              />
+            </div>
           </div>
         );
       case StrategyType.MACD_TREND:
         return (
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <ParamInput 
-              label="Fast EMA"
-              value={config.strategyParams.macdFast}
-              onChange={(v) => updateParam('macdFast', v)}
-              min={2} max={50}
-              hint="标准 12。灵敏反映价格的短期动能变化。"
-            />
-            <ParamInput 
-              label="Slow EMA"
-              value={config.strategyParams.macdSlow}
-              onChange={(v) => updateParam('macdSlow', v)}
-              min={5} max={100}
-              hint="标准 26。反映价格的中长期趋势。"
-            />
-            <ParamInput 
-              label="Signal Smoothing"
-              value={config.strategyParams.macdSignal}
-              onChange={(v) => updateParam('macdSignal', v)}
-              min={2} max={50}
-              hint="标准 9。MACD 线与其信号线的交叉用于生成买卖信号。"
-            />
+           <div>
+            {InfoBox}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <ParamInput 
+                label="Fast EMA"
+                value={config.strategyParams.macdFast}
+                onChange={(v) => updateParam('macdFast', v)}
+                min={2} max={50}
+                hint="标准 12。灵敏反映价格的短期动能变化。"
+              />
+              <ParamInput 
+                label="Slow EMA"
+                value={config.strategyParams.macdSlow}
+                onChange={(v) => updateParam('macdSlow', v)}
+                min={5} max={100}
+                hint="标准 26。反映价格的中长期趋势。"
+              />
+              <ParamInput 
+                label="Signal Smoothing"
+                value={config.strategyParams.macdSignal}
+                onChange={(v) => updateParam('macdSignal', v)}
+                min={2} max={50}
+                hint="标准 9。MACD 线与其信号线的交叉用于生成买卖信号。"
+              />
+            </div>
           </div>
         );
       case StrategyType.MARTINGALE:
         return (
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ParamInput 
-              label="补仓跌幅 (%)"
-              value={config.strategyParams.martingalePriceDrop}
-              onChange={(v) => updateParam('martingalePriceDrop', v)}
-              min={0.1} max={20} step={0.1} suffix="%"
-              hint="触发加仓的价格下跌百分比。"
-            />
-            <ParamInput 
-              label="止盈目标 (%)"
-              value={config.strategyParams.martingaleProfitTarget}
-              onChange={(v) => updateParam('martingaleProfitTarget', v)}
-              min={0.1} max={50} step={0.1} suffix="%"
-              hint="整体持仓的获利目标，达标后一次性平仓。"
-            />
-            <ParamInput 
-              label="加仓倍数 (Multiplier)"
-              value={config.strategyParams.martingaleVolumeMultiplier}
-              onChange={(v) => updateParam('martingaleVolumeMultiplier', v)}
-              min={1.0} max={5.0} step={0.1} suffix="x"
-              hint="每次加仓的数量倍数。建议 1.0-1.5。"
-            />
+           <div>
+            {InfoBox}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ParamInput 
+                label="补仓跌幅 (%)"
+                value={config.strategyParams.martingalePriceDrop}
+                onChange={(v) => updateParam('martingalePriceDrop', v)}
+                min={0.1} max={20} step={0.1} suffix="%"
+                hint="触发加仓的价格下跌百分比。"
+              />
+              <ParamInput 
+                label="止盈目标 (%)"
+                value={config.strategyParams.martingaleProfitTarget}
+                onChange={(v) => updateParam('martingaleProfitTarget', v)}
+                min={0.1} max={50} step={0.1} suffix="%"
+                hint="整体持仓的获利目标，达标后一次性平仓。"
+              />
+              <ParamInput 
+                label="加仓倍数 (Multiplier)"
+                value={config.strategyParams.martingaleVolumeMultiplier}
+                onChange={(v) => updateParam('martingaleVolumeMultiplier', v)}
+                min={1.0} max={5.0} step={0.1} suffix="x"
+                hint="每次加仓的数量倍数。建议 1.0-1.5。"
+              />
+            </div>
           </div>
         );
       default:
-        return <p className="text-sm text-gray-500 italic p-2 border border-dashed border-gray-800 rounded">当前策略无可配置的特定参数。</p>;
+        return (
+          <div>
+             {InfoBox}
+             <p className="text-sm text-gray-500 italic p-2 border border-dashed border-gray-800 rounded">当前策略无可配置的特定参数。</p>
+          </div>
+        );
     }
   };
 

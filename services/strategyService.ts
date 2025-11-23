@@ -133,21 +133,39 @@ const getStrategyInsight = (
       const rsi = calculateRSI(candles, params.rsiPeriod);
       metrics = [{ label: 'RSI', value: rsi.toFixed(1) }];
       
-      // Dynamic Thresholds based on Regime
+      // Dynamic Thresholds based on Regime (智能阈值调整)
       let buyThresh = params.rsiOversold;
       let sellThresh = params.rsiOverbought;
       
-      if (regime.type.includes('TRENDING')) {
-         // In trends, RSI hits extremes often. Widen thresholds.
-         tuningAction = "Trending: Widening thresholds to avoid false signals";
+      // Calculate dynamic offset based on trend strength (0-100)
+      // Trend Strength / 5 => 0 to 20 points adjustment
+      const trendOffset = Math.floor(regime.trendStrength / 5);
+
+      if (regime.type === 'TRENDING_UP') {
+         // 上升趋势 (Uptrend): 
+         // 1. RSI 常滞留在超买区，做空极易止损 -> 大幅提高卖出阈值 (Avoid Shorts)
+         // 2. 回调即买入机会 -> 保持或微调买入阈值
+         sellThresh += (5 + trendOffset); 
+         
+         tuningAction = `Uptrend (Str:${regime.trendStrength.toFixed(0)}): Raised Sell Limit to ${sellThresh}`;
+      } else if (regime.type === 'TRENDING_DOWN') {
+         // 下跌趋势 (Downtrend):
+         // 1. RSI 常滞留在超卖区，做多极易“接飞刀” -> 大幅降低买入阈值 (Avoid Longs)
+         buyThresh -= (5 + trendOffset);
+         
+         tuningAction = `Downtrend (Str:${regime.trendStrength.toFixed(0)}): Lowered Buy Limit to ${buyThresh}`;
+      } else if (regime.type === 'VOLATILE') {
+         // 高波动 (Volatile): 扩大双边阈值过滤噪音
          buyThresh -= 5;
          sellThresh += 5;
+         tuningAction = "High Volatility: Widen Thresholds (+/-5)";
       } else {
-         tuningAction = "Ranging: Standard reversion logic active";
+         // 震荡/横盘 (Ranging): 使用默认回归逻辑
+         tuningAction = "Ranging: Standard Reversion Logic";
       }
       
-      metrics.push({ label: 'Dynamic Low', value: buyThresh });
-      metrics.push({ label: 'Dynamic High', value: sellThresh });
+      metrics.push({ label: 'Dyn Buy', value: buyThresh.toFixed(0) });
+      metrics.push({ label: 'Dyn Sell', value: sellThresh.toFixed(0) });
 
       if (rsi < buyThresh) { signal = 'BUY'; rawScore = 1; }
       else if (rsi > sellThresh) { signal = 'SELL'; rawScore = -1; }
@@ -170,7 +188,7 @@ const getStrategyInsight = (
         { label: 'Band Width', value: `${widthPct.toFixed(2)}%` }
       ];
 
-      if (currentPrice < lower) { signal = 'BUY'; rawScore = 1; } // Mean reversion style for ranges? Or breakout? Usually breakout follows close. Let's assume Mean Reversion for this impl unless trend confirmed.
+      if (currentPrice < lower) { signal = 'BUY'; rawScore = 1; } 
       else if (currentPrice > upper) { signal = 'SELL'; rawScore = -1; }
       
       if (regime.volatility > 80) tuningAction = "High Volatility: Reducing breakout sensitivity";
