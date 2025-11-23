@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SystemConfig, 
@@ -21,8 +22,13 @@ import StatsPanel from './components/StatsPanel';
 import PositionTable from './components/PositionTable';
 import ConfigPanel from './components/ConfigPanel';
 
+// Storage Keys
+const STORAGE_KEY_CONFIG = 'quantmind_config_v1';
+const STORAGE_KEY_STATE = 'quantmind_state_v1';
+
 // Initial prices for simulation data before WebSocket connects
-const INITIAL_PRICES = {
+// Used only if no local storage is found
+const DEFAULT_INITIAL_PRICES = {
   [CryptoCurrency.BTC]: 96000,
   [CryptoCurrency.ETH]: 2650,
   [CryptoCurrency.BNB]: 610,
@@ -78,22 +84,65 @@ const getEnvApiKey = () => {
 };
 
 const App: React.FC = () => {
-  // --- State ---
-  const [config, setConfig] = useState<SystemConfig>(DEFAULT_CONFIG);
+  // --- State Initialization with Persistence ---
   
-  const [state, setState] = useState<SystemState>({
-    balance: DEFAULT_CONFIG.initialCapital, 
-    positions: [],
-    marketData: {
-      [CryptoCurrency.BTC]: generateInitialData(CryptoCurrency.BTC, INITIAL_PRICES.BTC, 100, '1m'),
-      [CryptoCurrency.ETH]: generateInitialData(CryptoCurrency.ETH, INITIAL_PRICES.ETH, 100, '1m'),
-      [CryptoCurrency.BNB]: generateInitialData(CryptoCurrency.BNB, INITIAL_PRICES.BNB, 100, '1m'),
-      [CryptoCurrency.SOL]: generateInitialData(CryptoCurrency.SOL, INITIAL_PRICES.SOL, 100, '1m'),
-      [CryptoCurrency.DOGE]: generateInitialData(CryptoCurrency.DOGE, INITIAL_PRICES.DOGE, 100, '1m'),
-    },
-    isLive: false,
-    logs: [],
-    currentPrices: INITIAL_PRICES
+  // 1. Load Config
+  const [config, setConfig] = useState<SystemConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
+      if (saved) {
+        return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.error("Failed to load config", e);
+    }
+    return DEFAULT_CONFIG;
+  });
+  
+  // 2. Load Core State (Balance, Positions, etc) & Generate Market Data
+  const [state, setState] = useState<SystemState>(() => {
+    let savedState: Partial<SystemState> | null = null;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_STATE);
+      if (saved) {
+        savedState = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error("Failed to load state", e);
+    }
+
+    // Determine starting prices: Saved prices OR Default prices
+    const startPrices = savedState?.currentPrices || DEFAULT_INITIAL_PRICES;
+
+    // Generate initial market data based on startPrices to ensure continuity
+    const initialMarketData: Record<string, MarketCandle[]> = {};
+    const assets = Object.values(CryptoCurrency) as string[];
+    
+    assets.forEach(symbol => {
+      // If we have a saved price, generate history ending at that price
+      const price = startPrices[symbol] || DEFAULT_INITIAL_PRICES[symbol as CryptoCurrency] || 100;
+      initialMarketData[symbol] = generateInitialData(symbol, price, 150, '1m');
+    });
+
+    if (savedState) {
+      return {
+        balance: savedState.balance ?? DEFAULT_CONFIG.initialCapital,
+        positions: savedState.positions || [],
+        marketData: initialMarketData,
+        isLive: false, // Always start paused
+        logs: savedState.logs || [],
+        currentPrices: startPrices
+      };
+    } else {
+      return {
+        balance: DEFAULT_CONFIG.initialCapital, 
+        positions: [],
+        marketData: initialMarketData,
+        isLive: false,
+        logs: [],
+        currentPrices: DEFAULT_INITIAL_PRICES
+      };
+    }
   });
 
   // State for Visualization
@@ -110,10 +159,32 @@ const App: React.FC = () => {
   const stateRef = useRef(state);
   const configRef = useRef(config);
   
+  // Update Refs
   useEffect(() => {
     stateRef.current = state;
     configRef.current = config;
   }, [state, config]);
+
+  // --- Persistence Effects ---
+
+  // Save Config on change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(config));
+  }, [config]);
+
+  // Save State (Throttled) on change
+  useEffect(() => {
+    // We do NOT save marketData to localStorage as it is too large.
+    // We save currentPrices, balance, positions, and logs.
+    const stateToSave = {
+      balance: state.balance,
+      positions: state.positions,
+      logs: state.logs.slice(-50), // Keep last 50 logs only to save space
+      currentPrices: state.currentPrices
+    };
+    localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(stateToSave));
+  }, [state.balance, state.positions, state.logs, state.currentPrices]);
+
 
   useEffect(() => {
     if (Object.keys(dataCache.current).length === 0) {
@@ -138,6 +209,20 @@ const App: React.FC = () => {
       }]
     }));
   }, []);
+
+  // Handle Config Changes (Sync Balance if Capital Changes)
+  const handleConfigChange = (newConfig: SystemConfig) => {
+    // If the user changes the initial capital, we should sync the current balance to match
+    // otherwise the dashboard PnL calculation (Balance - Initial) will be incorrect.
+    if (newConfig.initialCapital !== config.initialCapital) {
+      setState(prev => ({
+        ...prev,
+        balance: newConfig.initialCapital
+      }));
+      addLog(`配置已更新: 账户本金重置为 $${newConfig.initialCapital}`, 'INFO');
+    }
+    setConfig(newConfig);
+  };
 
   const handleManualClose = (tradeId: string) => {
     const trade = state.positions.find(p => p.id === tradeId);
@@ -169,6 +254,8 @@ const App: React.FC = () => {
     const oldData = currentState.marketData[symbol] || [];
     const newData = [...oldData];
     const lastCandle = newData[newData.length - 1];
+    
+    // Basic de-duplication based on timestamp
     if (lastCandle && lastCandle.timestamp === candle.timestamp) {
         newData[newData.length - 1] = candle;
     } else {
@@ -363,14 +450,28 @@ const App: React.FC = () => {
   };
 
   const resetSystem = () => {
-    setState(prev => ({
-      ...prev,
-      balance: config.initialCapital,
-      positions: [],
-      logs: [],
-      isLive: false
-    }));
-    addLog("账户状态已重置", "WARNING");
+    if (window.confirm("确定要重置所有账户数据吗？所有资金和交易记录将被清空。")) {
+        // Clear Local Storage
+        localStorage.removeItem(STORAGE_KEY_CONFIG);
+        localStorage.removeItem(STORAGE_KEY_STATE);
+
+        // Generate fresh data
+        const initialMarketData: Record<string, MarketCandle[]> = {};
+        Object.values(CryptoCurrency).forEach(symbol => {
+             initialMarketData[symbol as string] = generateInitialData(symbol as string, DEFAULT_INITIAL_PRICES[symbol as CryptoCurrency], 150, '1m');
+        });
+
+        setConfig(DEFAULT_CONFIG);
+        setState({
+            balance: DEFAULT_CONFIG.initialCapital,
+            positions: [],
+            marketData: initialMarketData,
+            isLive: false,
+            logs: [],
+            currentPrices: DEFAULT_INITIAL_PRICES
+        });
+        addLog("系统已重置至初始状态。", "WARNING");
+    }
   };
 
   const activePositions = state.positions.filter(p => p.status === 'OPEN');
@@ -422,7 +523,7 @@ const App: React.FC = () => {
         {activeTab === 'CONFIG' ? (
           <ConfigPanel 
             config={config} 
-            onConfigChange={setConfig} 
+            onConfigChange={handleConfigChange} 
             onClose={() => setActiveTab('DASHBOARD')} 
           />
         ) : (
