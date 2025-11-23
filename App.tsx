@@ -158,6 +158,8 @@ const App: React.FC = () => {
   const binanceService = useRef<BinanceService | null>(null);
   const stateRef = useRef(state);
   const configRef = useRef(config);
+  // Ref to prevent saving to localStorage during reset process
+  const isResettingRef = useRef(false); 
   
   // Update Refs
   useEffect(() => {
@@ -169,11 +171,13 @@ const App: React.FC = () => {
 
   // Save Config on change
   useEffect(() => {
+    if (isResettingRef.current) return;
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(config));
   }, [config]);
 
   // Save State (Throttled) on change
   useEffect(() => {
+    if (isResettingRef.current) return;
     // We do NOT save marketData to localStorage as it is too large.
     // We save currentPrices, balance, positions, and logs.
     const stateToSave = {
@@ -451,26 +455,15 @@ const App: React.FC = () => {
 
   const resetSystem = () => {
     if (window.confirm("确定要重置所有账户数据吗？所有资金和交易记录将被清空。")) {
+        // Set guard flag to prevent any pending useEffects from saving old data
+        isResettingRef.current = true;
+
         // Clear Local Storage
         localStorage.removeItem(STORAGE_KEY_CONFIG);
         localStorage.removeItem(STORAGE_KEY_STATE);
 
-        // Generate fresh data
-        const initialMarketData: Record<string, MarketCandle[]> = {};
-        Object.values(CryptoCurrency).forEach(symbol => {
-             initialMarketData[symbol as string] = generateInitialData(symbol as string, DEFAULT_INITIAL_PRICES[symbol as CryptoCurrency], 150, '1m');
-        });
-
-        setConfig(DEFAULT_CONFIG);
-        setState({
-            balance: DEFAULT_CONFIG.initialCapital,
-            positions: [],
-            marketData: initialMarketData,
-            isLive: false,
-            logs: [],
-            currentPrices: DEFAULT_INITIAL_PRICES
-        });
-        addLog("系统已重置至初始状态。", "WARNING");
+        // Force reload to ensure a completely clean state, resetting all Refs and Intervals
+        window.location.reload();
     }
   };
 
