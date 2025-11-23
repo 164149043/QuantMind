@@ -454,16 +454,21 @@ const App: React.FC = () => {
   };
 
   const resetSystem = () => {
-    if (window.confirm("确定要重置所有账户数据吗？所有资金和交易记录将被清空。")) {
-        // Set guard flag to prevent any pending useEffects from saving old data
+    const confirmed = window.confirm("⚠️ 警告：确定要重置系统吗？\n\n此操作将：\n1. 清空所有持仓和交易记录\n2. 恢复默认资金\n3. 清除所有自定义策略配置\n4. 强制刷新页面");
+    
+    if (confirmed) {
+        // 1. Set guard flag to prevent any pending useEffects from saving old data
         isResettingRef.current = true;
 
-        // Clear Local Storage
+        // 2. Clear Local Storage
         localStorage.removeItem(STORAGE_KEY_CONFIG);
         localStorage.removeItem(STORAGE_KEY_STATE);
 
-        // Force reload to ensure a completely clean state, resetting all Refs and Intervals
-        window.location.reload();
+        // 3. Force reload to ensure a completely clean state, resetting all Refs and Intervals
+        // Use setTimeout to allow the browser to process the storage clear event
+        setTimeout(() => {
+             window.location.reload();
+        }, 100);
     }
   };
 
